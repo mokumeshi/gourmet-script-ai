@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>鍋振りチャーハン｜2D手描きアニメ実験</title>
+<style>
+  :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #151b1b; color: #f6e9cd; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; }
+  main { width: min(100%, 1280px); }
+  canvas { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; background: #43352b; }
+  .bar { display: flex; align-items: center; gap: 14px; padding: 12px 16px; flex-wrap: wrap; }
+  button { background: #c96932; color: #fff8e9; border: 1px solid #e7a66c; border-radius: 4px; padding: 8px 14px; font: inherit; cursor: pointer; }
+  button:hover { background: #e27c3d; }
+  label { display: flex; align-items: center; gap: 8px; }
+  input[type=range] { width: min(240px, 38vw); accent-color: #efad58; }
+  .hint { font-size: 13px; color: #cabca7; margin-left: auto; }
+  @media (max-width: 650px) { .hint { width: 100%; margin-left: 0; } }
+</style>
+</head>
+<body>
+<main>
+  <canvas id="scene" width="1280" height="720" aria-label="中華鍋でチャーハンを振る、手描き風の2Dアニメーション"></canvas>
+  <div class="bar">
+    <button id="toggle" type="button">一時停止</button>
+    <label>時間 <input id="seek" type="range" min="0" max="6.4" step="0.01" value="0" aria-label="時間を移動"></label>
+    <button id="save" type="button">このコマをPNG保存</button>
+    <span class="hint">6.4秒ループ・1280×720・Canvas 2Dのみ・素材画像なし</span>
+  </div>
+</main>
+<script>
+(() => {
+  'use strict';
+  const canvas = document.getElementById('scene');
+  const ctx = canvas.getContext('2d');
+  const seek = document.getElementById('seek');
+  const toggle = document.getElementById('toggle');
+  const DURATION = 6.4, TAU = Math.PI * 2;
+  let playing = true, t = 0, last = 0;
+  let seed = 712031;
+  const rand = () => ((seed = (1664525 * seed + 1013904223) >>> 0) / 4294967296);
+  const clamp = (x, a=0, b=1) => Math.max(a, Math.min(b, x));
+  const smooth = x => { x = clamp(x); return x*x*(3-2*x); };
+  const pulse = (time, at, width) => Math.max(0, 1 - Math.abs(time-at)/width);
+  const tosses = [1.05, 2.58, 4.12, 5.62];
+  const ink = '#492a22';
+  const rice = Array.from({length:650}, (_,i) => {
+    const a=rand()*TAU, r=Math.sqrt(rand());
+    return {x:Math.cos(a)*r*244, y:Math.sin(a)*r*71, layer:rand(), tilt:(rand()-.5)*.9,
+      type: rand()<.12?'egg':rand()<.23?'pork':rand()<.35?'scallion':'rice', size:3+rand()*3,
+      tone:rand(), phase:rand()*TAU, i};
+  }).sort((a,b)=>a.y-b.y);
+  const airborne = Array.from({length:175}, (_,i)=>({x:(rand()-.5)*380, h:55+rand()*128, drift:(rand()-.5)*116,
+    phase:rand()*TAU, type:rand()<.13?'egg':rand()<.22?'pork':rand()<.35?'scallion':'rice',
+    size:3+rand()*3, wobble:rand()*7, i}));
+  const steam = Array.from({length:13}, (_,i)=>({x:410+i*37+(rand()-.5)*25, speed:36+rand()*28, phase:rand(), size:16+rand()*16}));
+  function line(points, color, width=2, close=false) {
+    ctx.beginPath(); ctx.moveTo(points[0][0],points[0][1]);
+    for(let i=1;i<points.length;i++) ctx.lineTo(points[i][0],points[i][1]);
+    if(close)ctx.closePath(); ctx.strokeStyle=color; ctx.lineWidth=width; ctx.stroke();
+  }
+  function ellipse(x,y,rx,ry,fill,stroke=null,width=2) {
+    ctx.beginPath();ctx.ellipse(x,y,Math.max(0.1,rx),Math.max(0.1,ry),0,0,TAU);
+    if(fill){ctx.fillStyle=fill;ctx.fill();} if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=width;ctx.stroke();}
+  }
+  function gradient(x1,y1,x2,y2,stops){ const g=ctx.createLinearGradient(x1,y1,x2,y2);stops.forEach(s=>g.addColorStop(s[0],s[1]));return g; }
+  function backdrop(time){
+    ctx.fillStyle=gradient(0,0,0,720,[[0,'#483b36'],[.54,'#5a4940'],[.55,'#3b3231'],[1,'#242a2b']]);ctx.fillRect(0,0,1280,720);
+    // Large painted kitchen shapes, deliberately soft in detail while keeping clear 2D edges.
+    ctx.fillStyle='#6a5547';ctx.fillRect(0,0,1280,295);
+    for(let y=38;y<285;y+=88) line([[0,y],[1280,y]],'#866a53',2);
+    for(let x=35;x<1280;x+=164) line([[x,0],[x,295]],'#745b4a',2);
+    ctx.fillStyle='#2a2d2c';ctx.fillRect(53,42,343,220);ctx.fillRect(862,35,330,210);
+    ctx.fillStyle='#a77a4e';ctx.fillRect(63,52,323,200);ctx.fillRect(872,45,310,190);
+    ctx.fillStyle='#393c39';ctx.fillRect(80,70,286,160);ctx.fillRect(891,61,272,158);
+    ctx.fillStyle='#9d6641';ctx.fillRect(0,286,1280,18);
+    ctx.fillStyle='#242828';ctx.fillRect(0,305,1280,190);
+    ctx.fillStyle='#2e3230';ctx.fillRect(0,494,1280,226);
+    line([[0,495],[1280,495]],'#8f7861',8);
+    // Copper stockpots and hanging utensils.
+    for(let i=0;i<5;i++){
+      let x=82+i*67;line([[x,9],[x,82]],'#2e2724',5);
+      ellipse(x,103,21,26,i%2?'#7a6150':'#9d704f','#392b27',3);
+      ellipse(x,91,17,7,'#bd8d61');
+    }
+    for(let i=0;i<4;i++){
+      let x=910+i*67;line([[x,15],[x,78]],'#292928',4);
+      ellipse(x,102,14,22,'#58605c','#222829',2);
+    }
+    ctx.fillStyle='#65635a';ctx.fillRect(142,522,1010,160);
+    ctx.fillStyle='#242a29';ctx.fillRect(166,535,952,126);
+    line([[166,538],[1118,538]],'#9b9986',6);
+    // Stove, cast iron rings and warm halo.
+    const glow=ctx.createRadialGradient(633,549,24,633,549,280);
+    glow.addColorStop(0,'rgba(241,120,46,.26)');glow.addColorStop(1,'rgba(241,120,46,0)');
+    ctx.fillStyle=glow;ctx.fillRect(330,300,610,410);
+    ellipse(635,584,282,48,'#202524','#898478',6);
+    ellipse(635,580,211,26,'#0d1618','#68706c',5);
+    for(let i=0;i<3;i++){ctx.strokeStyle='#5e6460';ctx.lineWidth=6;ctx.beginPath();ctx.ellipse(635,583,245+i*15,31+i*3,0,0,TAU);ctx.stroke();}
+    // Foreground muted ingredients for depth without realism.
+    ctx.fillStyle='#754b32';ctx.fillRect(0,655,1280,65);
+    line([[0,655],[1280,655]],'#b18558',5);
+    ellipse(115,681,130,21,'#2c302c','#897463',4);
+    ellipse(1130,677,130,22,'#31322d','#856a50',4);
+  }
+  function flame(time, power){
+    const rise=power;
+    for(let j=0;j<15;j++){
+      const x=435+j*28, wig=Math.sin(time*18+j*1.9)*11;
+      const h=(48+26*Math.sin(j*2.2+time*13)**2)*(0.55+rise*.83);
+      ctx.beginPath();ctx.moveTo(x-17,558);ctx.quadraticCurveTo(x-10+wig,540-h*.48,x+wig*.45,553-h);
+      ctx.quadraticCurveTo(x+7+wig,544-h*.58,x+19,558);ctx.closePath();
+      ctx.fillStyle=j%3===0?'#f8d26a':j%3===1?'#ed873d':'#e45530';ctx.fill();
+      ctx.beginPath();ctx.moveTo(x-6,558);ctx.quadraticCurveTo(x+wig*.25,537-h*.35,x+5,552-h*.38);
+      ctx.quadraticCurveTo(x+10,552,x+9,558);ctx.fillStyle='#fbe49d';ctx.fill();
+    }
+  }
+  function drawGrain(x,y,size,type,tone,angle,alpha=1){
+    ctx.save();ctx.translate(x,y);ctx.rotate(angle);ctx.globalAlpha=alpha;
+    if(type==='scallion'){
+      ctx.fillStyle=tone>.5?'#668a46':'#93a85a';ctx.beginPath();ctx.moveTo(-size,0);ctx.lineTo(size*.5,-size*.7);ctx.lineTo(size*.9,size*.2);ctx.lineTo(-size*.3,size*.75);ctx.closePath();ctx.fill();
+      ctx.strokeStyle='#355c3c';ctx.lineWidth=.8;ctx.stroke();
+    } else if(type==='egg'){
+      ctx.fillStyle=tone>.45?'#f0c450':'#f6d777';ctx.beginPath();ctx.moveTo(-size,0);ctx.lineTo(-size*.4,-size*.8);ctx.lineTo(size,-size*.5);ctx.lineTo(size*.7,size*.7);ctx.closePath();ctx.fill();
+      ctx.strokeStyle='#b47d30';ctx.lineWidth=.7;ctx.stroke();
+    } else if(type==='pork'){
+      ctx.fillStyle=tone>.5?'#9e5136':'#bd7050';ctx.fillRect(-size*.8,-size*.65,size*1.6,size*1.3);
+      ctx.fillStyle='#d18f60';ctx.fillRect(-size*.5,-size*.45,size*.6,size*.26);
+    } else {
+      ellipse(0,.9,size*1.22,size*.61,'#ba8650');
+      ellipse(-.5,-.55,size*1.16,size*.6,tone>.7?'#fff0bc':tone>.25?'#f7d99a':'#e7bb77');
+      ctx.strokeStyle='#c89158';ctx.lineWidth=.6;ctx.beginPath();ctx.ellipse(-.5,-.5,size*1.16,size*.6,0,0,TAU);ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function wok(time){
+    const motion=tosses.reduce((a,at)=>a+Math.sin(clamp((time-at+.25)/.72)*Math.PI)*((time>at-.25&&time<at+.47)?1:0),0);
+    const pitch=motion*.11, x=628+motion*42, y=403-motion*46;
+    ctx.save();ctx.translate(x,y);ctx.rotate(pitch);
+    // Handle disappears behind a purposeful foreground grip.
+    ctx.save();ctx.rotate(-.13);
+    ctx.fillStyle='#161d1d';ctx.beginPath();ctx.moveTo(225,23);ctx.lineTo(505,-67);ctx.lineTo(523,-56);ctx.lineTo(249,54);ctx.closePath();ctx.fill();
+    line([[262,27],[504,-58]],'#69716d',5);
+    ctx.fillStyle='#432f2a';ctx.beginPath();ctx.roundRect(400,-39,135,30,13);ctx.fill();
+    line([[415,-34],[524,-20]],'#9b6447',2);ctx.restore();
+    // Wok exterior, curved like a classic cel painting.
+    ctx.beginPath();ctx.moveTo(-297,-7);ctx.bezierCurveTo(-270,113,-205,177,-50,183);
+    ctx.bezierCurveTo(112,196,259,111,299,-6);ctx.bezierCurveTo(176,44,-176,49,-297,-7);ctx.closePath();
+    ctx.fillStyle=gradient(0,10,0,191,[[0,'#464d4a'],[.42,'#252e2e'],[.85,'#161f20'],[1,'#68706c']]);ctx.fill();ctx.strokeStyle='#172020';ctx.lineWidth=5;ctx.stroke();
+    ctx.beginPath();ctx.ellipse(0,0,297,93,0,0,TAU);ctx.fillStyle='#1b2626';ctx.fill();ctx.strokeStyle='#7f8b80';ctx.lineWidth=9;ctx.stroke();
+    ctx.beginPath();ctx.ellipse(0,7,268,73,0,0,TAU);ctx.fillStyle=gradient(0,-68,0,90,[[0,'#243030'],[.6,'#3d4035'],[1,'#171f20']]);ctx.fill();
+    ellipse(-98,40,119,21,'rgba(193,121,57,.12)');
+    // Rice mound: dozens of inked contours plus individually drawn grains.
+    ctx.beginPath();ctx.moveTo(-252,16);ctx.bezierCurveTo(-208,-18,-161,-27,-122,-32);
+    ctx.bezierCurveTo(-46,-61,36,-43,99,-37);ctx.bezierCurveTo(186,-32,226,-12,255,17);
+    ctx.bezierCurveTo(167,78,-181,86,-252,16);ctx.closePath();
+    ctx.fillStyle=gradient(0,-55,0,83,[[0,'#f5d47d'],[.44,'#d99f55'],[1,'#a45f36']]);ctx.fill();ctx.strokeStyle='#78462b';ctx.lineWidth=2.5;ctx.stroke();
+    for(const g of rice){
+      const shape=Math.sqrt(Math.max(0,1-(g.x/251)**2));
+      const yy=g.y*.7 - shape*(26+g.layer*19)+22;
+      const lift=motion*(2+g.layer*6);
+      drawGrain(g.x,yy-lift,g.size,g.type,g.tone,g.tilt,1);
+    }
+    // Small broad highlights are painted, not a glossy 3D shader.
+    for(let i=0;i<15;i++){
+      const g=rice[(i*37+13)%rice.length];
+      ellipse(g.x,-30+g.y*.48,2.8,1.1,'rgba(255,248,202,.76)');
+    }
+    // Front rim encloses the food.
+    ctx.beginPath();ctx.ellipse(0,0,297,93,0,.04,Math.PI-.04);
+    ctx.strokeStyle='#9ba59b';ctx.lineWidth=10;ctx.stroke();
+    ctx.beginPath();ctx.ellipse(0,0,297,93,0,.04,Math.PI-.04);
+    ctx.strokeStyle='#293534';ctx.lineWidth=4;ctx.stroke();
+    ctx.restore();
+    return {x,y,motion};
+  }
+  function flyingGrains(time,pan){
+    // One natural arc for each toss: all grains leave together, fan out, and settle back.
+    for(const at of tosses){
+      const p=(time-at)/.68;if(p<=0||p>=1)continue;
+      const arc=4*p*(1-p), ease=smooth(p), alpha=smooth(p/.11)*smooth((1-p)/.13);
+      for(const g of airborne){
+        const x=pan.x+g.x*(.58+.42*ease)+g.drift*ease+32*ease;
+        const y=pan.y-35-g.h*arc+22*ease+Math.sin(g.phase+p*13)*g.wobble;
+        drawGrain(x,y,g.size,g.type,(g.i%11)/11,g.phase+p*5,alpha);
+      }
+    }
+  }
+  function steamLines(time){
+    ctx.save();ctx.lineCap='round';
+    for(const s of steam){
+      const p=((time*s.speed/180+s.phase)%1), y=367-p*237;
+      const x=s.x+Math.sin(p*9+time*.9+s.phase*TAU)*16;
+      ctx.beginPath();ctx.moveTo(x,y+16);
+      ctx.bezierCurveTo(x-19,y-6,x+21,y-26,x+2,y-51);
+      ctx.bezierCurveTo(x-10,y-64,x+15,y-75,x+8,y-91);
+      ctx.strokeStyle=`rgba(255,235,199,${(.11+.20*Math.sin(Math.PI*p)).toFixed(3)})`;
+      ctx.lineWidth=s.size*(1-p)*.55;ctx.stroke();
+    }
+    ctx.restore();
+  }
+  function cook(time){
+    // The cook is cropped like an anime insert: attention stays on the food and wok.
+    ctx.fillStyle='#253434';ctx.beginPath();ctx.moveTo(1186,264);ctx.lineTo(1280,230);ctx.lineTo(1280,639);
+    ctx.lineTo(1130,643);ctx.quadraticCurveTo(1087,522,1100,402);ctx.closePath();ctx.fill();
+    line([[1185,267],[1116,343],[1101,453]],'#7b8c7e',7);
+    ctx.fillStyle='#e0ac78';ctx.beginPath();ctx.moveTo(1108,382);ctx.bezierCurveTo(1066,368,1038,321,1003,285);
+    ctx.lineTo(958,268);ctx.lineTo(940,295);ctx.bezierCurveTo(984,336,1012,401,1077,438);ctx.closePath();ctx.fill();
+    line([[941,296],[993,347],[1033,411],[1080,441]],'#8e563e',3);
+    // Hand holds the handle and follows the pan's rhythm.
+    const m=tosses.reduce((a,at)=>a+Math.sin(clamp((time-at+.25)/.72)*Math.PI)*((time>at-.25&&time<at+.47)?1:0),0);
+    ctx.save();ctx.translate(1017+m*32,298-m*29);ctx.rotate(-m*.08);
+    ellipse(0,0,43,24,'#e7b486','#885439',3);
+    for(let i=0;i<4;i++){
+      ctx.fillStyle='#e9b98b';ctx.beginPath();ctx.roundRect(-21+i*13,-21-i*1.5,15,34,7);ctx.fill();
+      line([[-20+i*13,-13],[-18+i*13,5]],'#a96848',1.5);
+    }
+    ctx.restore();
+  }
+  function atmosphere(time){
+    // Warm counter reflections and floating sparks, no asset textures.
+    for(let i=0;i<32;i++){
+      let x=365+(i*83)%565, y=548-((time*(28+i%5*8)+i*49)%178);
+      let a=.34*(1-(548-y)/180);ellipse(x+Math.sin(time*3+i)*9,y,1.2+i%3*.45,1.2,'rgba(255,191,89,'+a.toFixed(3)+')');
+    }
+    ctx.fillStyle='rgba(25,27,26,.18)';ctx.fillRect(0,0,1280,720);
+    const vignette=ctx.createRadialGradient(640,350,260,640,360,740);
+    vignette.addColorStop(0,'rgba(0,0,0,0)');vignette.addColorStop(1,'rgba(23,16,15,.46)');
+    ctx.fillStyle=vignette;ctx.fillRect(0,0,1280,720);
+  }
+  function render(time){
+    ctx.clearRect(0,0,1280,720);
+    const power=tosses.reduce((a,at)=>Math.max(a,pulse(time,at+.1,.5)),0);
+    backdrop(time);flame(time,power);wok(time);
+    // Grains in front of the back rim, steam in front of the food, cropped hand in foreground.
+    flyingGrains(time,{x:628+power*42,y:403-power*46});
+    steamLines(time);cook(time);atmosphere(time);
+  }
+  function frame(now){
+    if(!last)last=now;
+    if(playing){t=(t+Math.min((now-last)/1000,.08))%DURATION;seek.value=t.toFixed(2);}
+    last=now;render(t);requestAnimationFrame(frame);
+  }
+  toggle.addEventListener('click',()=>{playing=!playing;toggle.textContent=playing?'一時停止':'再生';});
+  seek.addEventListener('input',()=>{t=Number(seek.value);render(t);});
+  document.getElementById('save').addEventListener('click',()=>{
+    const a=document.createElement('a');a.href=canvas.toDataURL('image/png');a.download=`fried-rice-${t.toFixed(2)}s.png`;a.click();
+  });
+  document.addEventListener('keydown',e=>{if(e.code==='Space'&&e.target.tagName!=='BUTTON'){e.preventDefault();toggle.click();}});
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
