@@ -1,0 +1,7 @@
+{
+  "name": "fried-rice-canvas-animation",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": { "render": "node render-full.cjs" },
+  "dependencies": { "@napi-rs/canvas": "0.1.100" }
+}

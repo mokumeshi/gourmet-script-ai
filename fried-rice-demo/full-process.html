@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>チャーハンができるまで — 2D animation</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#202925;color:#f5e8cc;font-family:system-ui,sans-serif;min-height:100vh;display:grid;place-items:center}main{width:min(100%,1280px)}canvas{display:block;width:100%;height:auto;aspect-ratio:16/9;background:#73694f}.controls{padding:14px 18px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}button{font:inherit;color:#fff4da;background:#825137;border:1px solid #bd9e70;border-radius:5px;padding:8px 14px;cursor:pointer}button:hover{background:#a2673f}input{accent-color:#e6bb70;flex:1;min-width:100px}output{font-size:14px;min-width:9em}.note{padding:0 18px 16px;font-size:12px;color:#c5c2a9}button:focus-visible,input:focus-visible{outline:3px solid #ffe6a0;outline-offset:3px}
+</style>
+</head><body><main>
+<canvas id="scene" width="1280" height="720" aria-label="卵を割るところからチャーハンの完成までを描く2Dアニメ"></canvas>
+<div class="controls"><button id="play">一時停止</button><button id="restart">最初から</button><input id="seek" type="range" min="0" max="28" step="0.01" value="0" aria-label="再生位置"><output id="stage"></output><button id="save">PNG保存</button></div>
+<div class="note">28秒・1280×720・素材画像なしのCanvas 2D。時間を動かすと一時停止します。</div>
+<script>
+(()=>{'use strict';
+const canvas=document.getElementById('scene'),ctx=canvas.getContext('2d');
+const TAU=Math.PI*2,DURATION=28;let clock=0,playing=true,last=0;
+const C={ink:'#513426',skin:'#e8b780',skinLight:'#f7cea0',skinShade:'#bd7b52',rice:'#efd59a',egg:'#f3c142',pork:'#a75035',green:'#587b39'};
+const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v)),mix=(a,b,t)=>a+(b-a)*t,sm=t=>{t=clamp(t);return t*t*(3-2*t)},prog=(t,a,b)=>sm((t-a)/(b-a));
+let seed=42921;const random=()=>((seed=(1664525*seed+1013904223)>>>0)/4294967296);
+const grains=Array.from({length:1650},(_,i)=>{let x=(random()-.5)*2,v=random(),r=random();return{x,v,a:(random()-.5)*1.7,s:3.4+random()*2.4,c:random(),type:r<.72?'rice':r<.84?'egg':r<.93?'pork':'green',i};});
+const airborne=Array.from({length:280},(_,i)=>({x:(random()-.5)*400,y:random()*55,s:3.5+random()*3,a:random()*TAU,c:random(),type:i%13===0?'pork':i%7===0?'green':i%5===0?'egg':'rice',lag:random()*.085}));
+const curds=Array.from({length:80},(_,i)=>({x:(random()-.5)*365,y:(random()-.5)*65,s:9+random()*12,a:random()*TAU,c:random()}));
+function path(d,fill,stroke=C.ink,w=2){ctx.beginPath();d(ctx);if(fill){ctx.fillStyle=fill;ctx.fill()}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=w;ctx.stroke()}}
+function ellipse(x,y,rx,ry,fill,stroke=null,w=2){path(c=>c.ellipse(x,y,Math.max(.01,rx),Math.max(.01,ry),0,0,TAU),fill,stroke,w)}
+function line(pts,col,w=2){path(c=>{c.moveTo(...pts[0]);pts.slice(1).forEach(p=>c.lineTo(...p))},null,col,w)}
+function grad(x,y,x2,y2,stops){const g=ctx.createLinearGradient(x,y,x2,y2);stops.forEach(([p,c])=>g.addColorStop(p,c));return g}
+function poly(p,f,s=C.ink,w=2){path(c=>{c.moveTo(...p[0]);p.slice(1).forEach(p=>c.lineTo(...p));c.closePath()},f,s,w)}
+function roundRect(x,y,w,h,r,f,s=null){path(c=>c.roundRect(x,y,w,h,r),f,s,2)}
+function background(t,table=false){
+ctx.fillStyle='#77745b';ctx.fillRect(0,0,1280,720);
+ctx.fillStyle=grad(0,0,0,530,[[0,'#637064'],[1,'#a49b70']]);ctx.fillRect(0,0,1280,510);
+for(let y=0;y<510;y+=89)line([[0,y],[1280,y+2]],'#828974',2);
+for(let row=0;row<6;row++)for(let x=-80+(row%2)*100;x<1280;x+=200)line([[x,row*89],[x,(row+1)*89]],'#858b75',2);
+// Bright kitchen window, its light is painted in warm flat shapes.
+roundRect(35,25,260,314,2,'#444b40','#474136');roundRect(48,37,234,287,1,'#b6bc8a');
+poly([[49,38],[281,38],[281,206],[49,291]],'#d4d19b',null);
+line([[162,40],[162,324]],'#6d6e52',11);line([[49,176],[281,176]],'#6d6e52',10);
+line([[38,333],[295,333]],'#d6c498',12);
+ctx.fillStyle='#566052';ctx.fillRect(909,47,319,211);ctx.fillStyle='#394b44';ctx.fillRect(924,63,285,179);
+line([[903,257],[1230,257]],'#b4976b',11);
+for(let i=0;i<4;i++){const x=953+i*71;line([[x,59],[x,108]],'#b7ae8d',4);ellipse(x,135,16,24,'#738173','#37483f',3);line([[x-9,124],[x-10,142]],'#adb19a',2)}
+// Stockpot and small ceramics, receding into the background.
+ellipse(165,435,89,25,'#303f38');roundRect(80,362,170,78,15,'#6b7964','#3e4c3e');ellipse(165,364,85,18,'#a0ab8c','#4f5e4e');ellipse(165,359,34,8,'#545f4c');roundRect(160,345,13,12,3,'#444e3c');
+roundRect(1028,353,79,87,14,'#e3d1a0','#665a40');ellipse(1067,355,40,11,'#8d6c44');
+ctx.fillStyle=table?'#a86d3f':'#676f60';ctx.fillRect(0,488,1280,232);
+line([[0,489],[1280,489]],table?'#c18f58':'#b5af8d',9);
+if(table){for(let y=550;y<720;y+=80)line([[0,y],[1280,y+3]],'#895538',2);for(let i=0;i<35;i++){let x=(i*97)%1280,y=514+(i*31)%190;line([[x,y],[x+55,y+1]],'rgba(239,175,105,.22)',1.4)}}
+else{roundRect(247,513,778,182,8,'#464f44','#303f37');ellipse(638,603,253,44,'#252e28','#aaa88e',8);ellipse(638,599,193,26,'#192923','#727d69',5);line([[389,601],[464,596]],'#929681',12);line([[812,597],[889,603]],'#929681',12)}
+}
+function fire(t,boost=0){for(let i=0;i<18;i++){let x=405+i*27,h=33+boost*53+Math.sin(t*16+i*1.7)*12,w=Math.sin(t*11+i)*7;path(c=>{c.moveTo(x-13,580);c.quadraticCurveTo(x-19,550-h*.6,x+w,576-h);c.quadraticCurveTo(x+12,556-h*.3,x+17,580);c.closePath()},i%3===0?'#ed8f38':'#f3b348',null);path(c=>{c.moveTo(x-6,580);c.quadraticCurveTo(x-9,570-h*.6,x+w*.3,579-h*.6);c.quadraticCurveTo(x+8,570,x+9,580)},'#f9dc83',null)}}
+function hand(x,y,angle=0,flip=1,scale=1){ctx.save();ctx.translate(x,y);ctx.rotate(angle);ctx.scale(flip*scale,scale);
+// Wrist, thumb and knuckles are connected; the forearm continues outside frame.
+path(c=>{c.moveTo(22,25);c.lineTo(1050,330);c.lineTo(1075,267);c.lineTo(28,-23);c.quadraticCurveTo(-9,-40,-39,-18);c.quadraticCurveTo(-57,-2,-44,17);c.quadraticCurveTo(-11,30,22,25)},C.skin,C.ink,3);
+path(c=>{c.moveTo(17,19);c.lineTo(1015,315);c.lineTo(1031,295);c.lineTo(37,4);c.quadraticCurveTo(12,3,17,19)},C.skinShade,null);
+poly([[118,3],[1087,263],[1087,372],[98,63]],'#ded8bd','#716b55',2);poly([[98,47],[1087,335],[1087,372],[98,63]],'#b5b99e',null);line([[114,8],[102,58]],'#f1e9cd',7);
+for(let i=0;i<3;i++)path(c=>{c.moveTo(-29+i*15,-18);c.quadraticCurveTo(-36+i*15,-7,-24+i*15,8)},null,'#b97d54',1.7);
+path(c=>{c.moveTo(-24,15);c.quadraticCurveTo(-33,38,-8,33);c.lineTo(28,12);c.quadraticCurveTo(37,-1,22,-7);c.quadraticCurveTo(3,8,-24,15)},C.skinLight,C.ink,2);
+ctx.restore()}
+function grain(x,y,s,type,a=0,tone=.5,golden=1){ctx.save();ctx.translate(x,y);ctx.rotate(a);
+if(type==='rice'){ellipse(0,.8,s*1.3,s*.66,'#ad7f43');ellipse(-.2,-.5,s*1.24,s*.58,golden<.5?(tone>.3?'#fff4d3':'#e3d7b4'):(tone>.64?'#fff0b2':tone>.24?'#f4d38a':'#ddb168'));line([[-s*.8,-1],[s*.2,-1.5]],'rgba(255,252,211,.56)',.85)}
+else if(type==='egg'){poly([[-s,-s*.3],[-s*.4,-s],[s*.8,-s*.5],[s,s*.4],[s*.2,s*.8],[-s*.6,s*.5]],tone>.3?'#f4cb49':'#dca834','#ae7a32',.6);line([[-s*.4,-s*.4],[s*.35,-s*.4]],'#ffe89a',1.4)}
+else if(type==='pork'){poly([[-s,-s*.65],[s*.7,-s*.8],[s,s*.7],[-s*.8,s]],tone>.5?'#9e4b31':'#b5643c','#743926',.9);poly([[-s*.7,-s*.5],[s*.25,-s*.55],[s*.4,-s*.12],[-s*.6,0]],'#dfa16a',null)}
+else{poly([[-s,-s*.4],[s*.35,-s],[s*.9,s*.1],[-s*.35,s*.85]],tone>.4?'#76a34d':'#466e38','#3e5e30',.6);line([[-s*.5,0],[s*.3,-s*.45]],'#acc979',1)}ctx.restore()}
+function mound(cx,cy,rx,h,ry,amount=1,golden=1,ingredients=true){if(amount<=.005)return;ctx.save();ctx.translate(cx,cy);let sc=Math.pow(amount,.35);ctx.scale(sc,sc);
+path(c=>{c.moveTo(-rx,0);c.bezierCurveTo(-rx*.86,-h*.66,-rx*.45,-h*1.02,0,-h);c.bezierCurveTo(rx*.44,-h*1.02,rx*.86,-h*.66,rx,0);c.bezierCurveTo(rx*.55,ry*1.27,-rx*.64,ry*1.27,-rx,0)},grad(0,-h,0,ry,[[0,golden>.5?'#f3d080':'#f4e8bf'],[.6,golden>.5?'#dba34d':'#daceaa'],[1,golden>.5?'#ad6b38':'#b9a27e']]),'#965f32',1.4);
+const ordered=grains.map(g=>({g,y:Math.sqrt(1-g.x*g.x)*(-h+g.v*(h+ry))})).sort((a,b)=>a.y-b.y);
+for(const {g,y}of ordered){let type=ingredients?g.type:g.type==='egg'?'egg':'rice';grain(g.x*rx*.98,y,g.s,type,g.a,g.c,golden)}ctx.restore()}
+function wokBase(x,y,rot=0,scale=1,handle=true){ctx.save();ctx.translate(x,y);ctx.rotate(rot);ctx.scale(scale,scale);
+if(handle){poly([[254,4],[470,-107],[487,-78],[281,39]],'#383b32','#2a342d',3);line([[290,9],[467,-88]],'#929580',5);ctx.save();ctx.translate(418,-91);ctx.rotate(-.48);roundRect(-10,-17,126,35,10,'#715138','#342e23');line([[4,-10],[102,-10]],'#ba8c59',3);ctx.restore()}
+path(c=>{c.moveTo(-315,0);c.bezierCurveTo(-284,122,-193,158,0,155);c.bezierCurveTo(189,154,277,108,315,0);c.closePath()},grad(0,0,0,157,[[0,'#5b6757'],[.5,'#344738'],[.88,'#28392f'],[1,'#8a8e71']]),'#293a2e',4);
+ellipse(0,0,315,103,'#323f30','#a3ac8f',9);ellipse(0,4,297,90,grad(0,-80,0,90,[[0,'#344330'],[.5,'#4f5637'],[1,'#263b2c']]));
+ctx.restore()}
+function rim(x,y,rot=0,scale=1){ctx.save();ctx.translate(x,y);ctx.rotate(rot);ctx.scale(scale,scale);path(c=>c.ellipse(0,0,315,103,0,.03,Math.PI-.03),null,'#9da58c',9);path(c=>c.ellipse(0,0,315,103,0,.03,Math.PI-.03),null,'#374a36',3);path(c=>c.ellipse(0,0,314,101,0,.25,1.45),null,'#d0d2ad',2);ctx.restore()}
+function oil(t){ellipse(0,24,180,34,'rgba(225,186,75,.22)');path(c=>c.ellipse(-55,16,121,23,-.09,Math.PI*.9,Math.PI*1.8),null,'rgba(239,216,123,.56)',2);for(let i=0;i<10;i++)ellipse(-150+i*32,31+Math.sin(i*4+t*5)*9,1.8,1.2,'#e5c575')}
+function rawEgg(t){const p=prog(t,2.91,3.5),cook=prog(t,3.6,5.1);if(p<=0)return;
+ctx.save();ctx.translate(0,14);ctx.scale(p,p);path(c=>{c.moveTo(-134,-10);c.bezierCurveTo(-114,-56,-63,-30,-38,-49);c.bezierCurveTo(7,-65,56,-40,98,-24);c.bezierCurveTo(166,-12,163,39,102,41);c.bezierCurveTo(29,58,-139,38,-134,-10)},cook>.45?'#f0d584':'#e8e0b0','#a69e62',1.5);ellipse(9,-6,41,24,'#eda52f','#c28229',2);ellipse(-3,-15,20,8,'#ffd671');ctx.restore()}
+function scrambled(t){let p=prog(t,4.2,6.7);ctx.globalAlpha=p;for(const c of curds){let jig=Math.sin(t*6+c.a)*8*(1-prog(t,6.6,7.2));grain(c.x+jig,c.y+13,c.s,'egg',c.a+t*.09,c.c)}ctx.globalAlpha=1}
+function steam(t,cx=640,cy=405,intensity=1){ctx.save();ctx.lineCap='round';for(let i=0;i<9;i++){const p=((t*.22+i*.117)%1),x=cx-171+i*43+Math.sin(t*1.4+i)*13,y=cy-p*193;const a=Math.sin(Math.PI*p)*.28*intensity;path(c=>{c.moveTo(x,y);c.bezierCurveTo(x-20,y-24,x+19,y-33,x-2,y-57);c.bezierCurveTo(x-18,y-72,x+15,y-88,x+8,y-102)},null,`rgba(255,247,211,${a})`,8*(1-p)+2)}ctx.restore()}
+function wholeEgg(x,y,a=0){ctx.save();ctx.translate(x,y);ctx.rotate(a);path(c=>{c.moveTo(0,-41);c.bezierCurveTo(31,-41,48,12,31,30);c.bezierCurveTo(12,51,-29,41,-35,17);c.bezierCurveTo(-45,-5,-22,-40,0,-41)},'#e9c997','#8f6743',2.7);path(c=>{c.moveTo(-8,-28);c.quadraticCurveTo(-28,-13,-21,8)},null,'#fff0cb',5);ctx.restore()}
+function eggShell(x,y,a,side){ctx.save();ctx.translate(x,y);ctx.rotate(a);ctx.scale(side,1);path(c=>{c.moveTo(0,-35);c.bezierCurveTo(-48,-40,-57,19,-30,34);c.quadraticCurveTo(-17,46,0,35);c.lineTo(-5,21);c.lineTo(4,11);c.lineTo(-3,-2);c.lineTo(5,-16);c.lineTo(-3,-23);c.closePath()},'#e9c795','#885d3d',2.4);poly([[0,-33],[-7,-21],[0,-6],[-6,7],[1,21],[0,34],[-12,21],[-15,-11]],'#fff1ca',null);ctx.restore()}
+function crackEgg(t){if(t>4.1)return;const depart=prog(t,3.3,4.1),split=prog(t,1.9,2.5);let y=207+Math.sin(clamp((t-.5)/.8)*Math.PI)*177;const x=640;
+ctx.save();ctx.globalAlpha=1-depart;
+if(t<1.9){hand(x+16,y-8,-.1,1,.79);wholeEgg(x,y,.13);if(t>1.35)line([[637,y-26],[645,y-12],[634,y+1],[644,y+13]],'#795133',2)}
+else{let gap=split*62;hand(x-gap-24,y-9,-.18,-1,.78);hand(x+gap+24,y-9,.18,1,.78);eggShell(x-gap,y,-split*.3,1);eggShell(x+gap,y,split*.3,-1);
+if(t>2.16&&t<2.93){let fall=clamp((t-2.16)/.77),end=217+fall*220;path(c=>{c.moveTo(x-8,225);c.bezierCurveTo(x-11,end-48,x-27,end-21,x-13,end);c.quadraticCurveTo(x,end+14,x+14,end);c.bezierCurveTo(x+23,end-33,x+7,245,x+8,225)},'rgba(249,239,189,.8)',null);ellipse(x,end,22+fall*9,24-fall*4,'#f0b533','#c18a30',1.5);ellipse(x-7,end-8,7,4,'#ffde84')}
+}ctx.restore()}
+function spatula(t,amount=1){ctx.save();const swing=Math.sin(t*7),x=663+swing*150,y=455+Math.cos(t*7)*24;ctx.translate(x,y);ctx.rotate(-.48+swing*.25);ctx.globalAlpha=amount;
+poly([[10,-15],[147,-204],[161,-196],[35,8]],'#ac8050','#654b2e',2);path(c=>{c.moveTo(-35,-29);c.quadraticCurveTo(13,-40,39,-12);c.lineTo(23,23);c.quadraticCurveTo(-8,38,-45,18);c.closePath()},'#b4bb9b','#52634e',3);path(c=>{c.moveTo(-30,-20);c.quadraticCurveTo(5,-27,24,-8)},null,'#e3dfb9',3);ctx.restore();hand(x+141,y-192,-.35,1,.7)}
+function bowl(x,y,tilt,amount=1,ingredient=false){ctx.save();ctx.translate(x,y);ctx.rotate(tilt);path(c=>{c.moveTo(-90,0);c.quadraticCurveTo(-65,102,6,93);c.quadraticCurveTo(79,81,90,0);c.closePath()},'#e3ddbe','#657064',3);path(c=>{c.moveTo(-84,11);c.quadraticCurveTo(-42,95,29,76)},null,'#b1bba0',15);ellipse(0,0,91,31,'#f5efd0','#687363',3);ellipse(0,0,75,23,ingredient?'#857045':'#d9ceb0');if(amount>.02){for(let i=0;i<100*amount;i++){const g=grains[i];grain(g.x*66,(g.v-.5)*32,ingredient?5:4,ingredient?(i%2?'green':'pork'):'rice',g.a,g.c,0)}}ctx.restore()}
+function pourRice(t){if(t<6.9||t>10.15)return;let p=prog(t,7.05,9.8),enter=prog(t,6.9,7.2),leave=prog(t,9.8,10.15);let x=400,y=205-(1-enter)*190-leave*190,angle=.45+p*.65;hand(x-81,y+37,-2.6,1,.8);bowl(x,y,angle,1-p);
+for(let i=0;i<220;i++){let born=7.22+(i/220)*1.9,u=(t-born)/.7;if(u<=0||u>=1)continue;const g=grains[i];grain(mix(452,638+g.x*123,u),mix(251,455+g.v*17,u*u),g.s*1.13,'rice',g.a+u*2,g.c,0)}}
+function pourIngredients(t){if(t<10||t>12.05)return;const enter=prog(t,10,10.35),leave=prog(t,11.7,12.05),x=904,y=211-160*(1-enter)-160*leave;hand(x+67,y+35,-.35,1,.75);bowl(x,y,-.65,1-prog(t,10.4,11.55),true);
+for(let i=0;i<115;i++){let born=10.35+i/115*.95,u=(t-born)/.55;if(u<=0||u>=1)continue;let g=grains[i];grain(mix(841,640+g.x*180,u),mix(225,433+g.v*40,u*u),g.s*1.4,i%3===0?'green':'pork',g.a+u*4,g.c)}}
+function sauce(t){if(t<12||t>13.2)return;let enter=prog(t,12,12.2),leave=prog(t,12.95,13.2);let x=825,y=228-120*(1-enter)-160*leave;hand(x+81,y-20,-.2,1,.7);line([[x+14,y],[x+110,y-33]],'#aaad8e',11);ellipse(x,y,43,19,'#bbbda1','#5b6651',3);ellipse(x-9,y+4,25,9,'#603721');if(t>12.25&&t<12.95)path(c=>{c.moveTo(x-37,y+6);c.bezierCurveTo(x-66,y+25,730,365,735,447)},null,'#8f572b',4)}
+const tossTimes=[14.2,15.85,17.5,19.15];
+function tossState(t){for(const at of tossTimes){const p=(t-at)/1.05;if(p>-.2&&p<1){const q=clamp(p),height=Math.sin(q*Math.PI),draw=Math.sin(clamp((p+.2)/1.2)*Math.PI);return{p,amount:height,x:640+draw*40,y:444-draw*42,rot:draw*.14}}}return{p:-1,amount:0,x:640,y:444,rot:0}}
+function kitchenScene(t){background(t);const pan=tossState(t);fire(t,pan.amount*.8);wokBase(pan.x,pan.y,pan.rot);
+ctx.save();ctx.translate(pan.x,pan.y);ctx.rotate(pan.rot);oil(t);
+if(t<5.2){ctx.globalAlpha=1-prog(t,4.25,5.2);rawEgg(t);ctx.globalAlpha=1}if(t>4.2&&t<9.5)scrambled(t);
+const riceAmount=prog(t,7.35,9.7);if(riceAmount>0)mound(0,12,232,57,46,riceAmount*(1-pan.amount*.3),prog(t,12,14.4),t>10.65);
+ctx.restore();
+if(pan.p>=0&&pan.p<1){for(let i=0;i<airborne.length;i++){const g=airborne[i],q=clamp((pan.p-g.lag)/(.89-g.lag));if(q<=0||q>=1)continue;const arc=4*q*(1-q),spread=.56+.44*q;
+const x=pan.x+g.x*spread+42*Math.sin(q*Math.PI),y=pan.y-38-(112+g.y*2.7)*arc+(g.y-25)*.5+g.x*.12*arc;grain(x,y,g.s,g.type,g.a+q*4,g.c)}}
+rim(pan.x,pan.y,pan.rot);
+if(t>3.25)steam(t,pan.x,pan.y-30,prog(t,3.25,6));
+if(t<4.1)crackEgg(t);
+if((t>4.0&&t<7.0)||(t>12.8&&t<14.1))spatula(t);
+pourRice(t);pourIngredients(t);sauce(t);
+if(t>13.65)hand(pan.x+464,pan.y-76+pan.rot*340,-.30+pan.rot,1,.85);
+}
+function plate(x,y,scale=1){ctx.save();ctx.translate(x,y);ctx.scale(scale,scale);ellipse(0,29,327,64,'rgba(61,36,21,.3)');path(c=>{c.moveTo(-326,0);c.quadraticCurveTo(-290,89,0,84);c.quadraticCurveTo(297,84,328,0)},'#c0c7af','#63765d',3);ellipse(0,0,330,94,'#f2ead0','#737d67',3);ellipse(0,-1,284,66,'#dce1c5','#a9b394',2);path(c=>c.ellipse(0,-2,307,81,0,.12,Math.PI-.12),null,'#eee4c5',5);for(let i=0;i<2;i++){path(c=>c.ellipse(0,0,316-i*8,87-i*4,0,0,TAU),null,'#a15d43',1.7)}ctx.restore()}
+function plating(t){background(t,true);const p=prog(t,21.1,23.5),enter=prog(t,20.5,21.15),leave=prog(t,23.55,24.1),px=715,py=531;plate(px,py);mound(px,py-9,230,115,49,p);
+if(t<24.1){let x=mix(329,423,enter)-leave*540,y=213-leave*180,rot=.60+enter*.22;wokBase(x,y,rot,.79,false);ctx.save();ctx.translate(x,y);ctx.rotate(rot);ctx.scale(.79,.79);mound(0,8,232,62,48,1-p);ctx.restore();rim(x,y,rot,.79);
+for(let i=0;i<340;i++){const g=grains[i],birth=21.13+i/340*1.93,u=(t-birth)/.4;if(u<=0||u>=1)continue;const sx=x+205,sy=y+151;grain(mix(sx,px+g.x*183,u),mix(sy,py-82+g.v*90,u*u),g.s,g.type,g.a+u*3,g.c)}}steam(t,px,py-92,.8)}
+function hero(t){background(t,true);const push=1+prog(t,24,27.6)*.13;ctx.save();ctx.translate(640,425);ctx.scale(push,push);ctx.translate(-640,-425);plate(640,501,1.09);mound(640,486,251,146,55,1);
+// A few cut scallions settle on the crown.
+for(let i=0;i<18;i++){const g=grains[i];let q=clamp((t-24.2-i*.026)/.7);if(t>24.2+i*.026)grain(640+g.x*110,350+(1-q)*-148+g.v*28,g.s*1.05,'green',g.a+q*2,g.c)}
+steam(t,640,378,1);
+// Off-centre highlights read as oil on individual rice grains.
+for(let i=0;i<5;i++){const shine=Math.sin(Math.PI*clamp((t-24.7-i*.47)/.45));if(shine<=0)continue;let x=527+i*53,y=390+(i%2)*26;ctx.globalAlpha=shine*.7;line([[x-4,y],[x+4,y]],'#fff8cb',1.7);ctx.globalAlpha=1}ctx.restore();
+}
+function renderAt(seconds){const t=clamp(seconds,0,DURATION-.001);ctx.resetTransform();ctx.clearRect(0,0,1280,720);ctx.lineJoin='round';ctx.lineCap='round';if(t<20.5)kitchenScene(t);else if(t<24)plating(t);else hero(t);
+// Subtle warm edge shading; the food remains bright.
+const v=ctx.createRadialGradient(620,378,280,640,360,770);v.addColorStop(0,'rgba(36,35,22,0)');v.addColorStop(1,'rgba(36,35,22,.20)');ctx.fillStyle=v;ctx.fillRect(0,0,1280,720);
+}
+function stageAt(t){return t<4?'卵を割る':t<7?'卵をほぐす':t<10?'ご飯を入れる':t<12?'具材を加える':t<14?'味付け・混ぜる':t<20.5?'鍋を振る':t<24?'皿に盛り付ける':'完成'}
+const play=document.getElementById('play'),seek=document.getElementById('seek'),stage=document.getElementById('stage');
+function show(){renderAt(clock);seek.value=String(clock);stage.textContent=stageAt(clock)+' '+clock.toFixed(1)+'秒'}
+function setPlaying(v){playing=v;play.textContent=v?'一時停止':'再生'}
+function frame(now){if(last&&playing)clock=(clock+Math.min((now-last)/1000,.1))%DURATION;last=now;show();requestAnimationFrame(frame)}
+play.addEventListener('click',()=>setPlaying(!playing));document.getElementById('restart').addEventListener('click',()=>{clock=0;setPlaying(true)});seek.addEventListener('input',()=>{clock=Number(seek.value);setPlaying(false);show()});
+document.getElementById('save').addEventListener('click',()=>{const a=document.createElement('a');a.download='fried-rice-'+clock.toFixed(2)+'.png';a.href=canvas.toDataURL('image/png');a.click()});
+window.FriedRice={renderAt,duration:DURATION,stageAt};show();requestAnimationFrame(frame);
+})();
+</script></body></html>
