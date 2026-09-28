@@ -25,7 +25,7 @@ const fps = 24;
   const encoder = spawn('ffmpeg', [
     '-y', '-f', 'rawvideo', '-pixel_format', 'rgba', '-video_size', '1280x720',
     '-framerate', String(fps), '-i', '-', '-an', '-c:v', 'libx264', '-preset', 'fast',
-    '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+    '-crf', '28', '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
     path.join(root, 'fried-rice-full-process.mp4'),
   ], { stdio: ['pipe', 'ignore', 'pipe'] });
   let error = '';
